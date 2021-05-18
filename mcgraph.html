@@ -1,0 +1,415 @@
+<!doctype html>
+<html>
+
+<head>
+	<title>2b2t 1.16 testing server info</title>
+    <link rel="icon" type="image/png" href="[ICONURL]"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.22.2/moment.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>
+    <!-- <script src="../decimation.js"></script> -->
+	<!-- <script src="../utils.js"></script> -->
+	<style>
+        html {
+            overflow: hidden;
+        }
+        canvas {
+            -moz-user-select: none;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        .chart-container {
+            position: absolute;
+            top: -4px;
+            width: 100%;
+            height: 100%;
+        }
+        .container {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .cui {
+            z-index: 1000;
+            position: absolute;
+            -moz-user-select: none;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        #theme-toggle {
+            color: rgb(0, 185, 0);
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        #settings-btn {
+            color: rgb(0, 185, 0);
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        #info-btn {
+            color: rgb(0, 185, 0);
+            text-decoration: underline;
+            cursor: pointer;
+            margin: 0px 40px;
+        }
+        modal {
+            position: absolute;
+            /*top: 0;
+            right: 0; */
+            /* width: 150px; */
+            /* padding: 10% 20%; */
+            /* background-color: rgb(211, 211, 211); */
+            /* border-color: black; */
+            /* margin: calc(10%) calc(30%); */
+        }
+        modal.leave{
+            animation-duration: 0.5s;
+            animation-name: slidein;
+            animation-direction: reverse;
+        }
+        modal.appear{
+            animation-duration: 0.5s;
+            animation-name: slidein;
+        }
+        modal > span {
+            margin-top: -5px;
+        }
+        modal > input[type=range], modal > input[type=checkbox] {
+            margin-top: 1.5px;
+            float: right;
+        }
+        modal#settings-m {
+            right: -250px;
+            float: right;
+            height: 40px;
+            max-height: 40px;
+            overflow-y: scroll;
+            -ms-overflow-style: none;
+        }
+        modal#settings-m::-webkit-scrollbar {
+            display: none;
+        }
+        @keyframes slidein {
+            from {
+                right: -250px;
+            }
+            to {
+                right: 2px;
+            }
+        }
+	</style>
+</head>
+
+<body>
+	<div class="container">
+	</div>
+    <div class="cui">
+        <select id="filter" onchange="updateTimeline(true,false);">
+            <option value="6h">past 6 hours</option>
+            <option value="12h">past 12 hours</option>
+            <option value="24h" selected="true">past 24 hours</option>
+            <option value="48h">past 48 hours</option>
+            <option value="72h">past 72 hours</option>
+            <option value="4d">past 4 days</option>
+            <option value="5d">past 5 days</option>
+            <option value="6d">past 6 days</option>
+            <option value="a">all time</option>
+        </select>
+        <span id="theme-toggle" onclick="toggleTheme()">toggle theme</span>
+        <span id="settings-btn" onclick="toggleSettings()">settings</span><br><span id="info-btn">info</span>
+        <!-- <input step="10800000" value="10800000" type="range" min="0" max="691200000" id="filter"oninput="updateTimeline();infochart.update()"> -->
+    </div>
+    <modal id="settings-m">
+        <span id="lts">Line tension: 0.4</span><input type="range" value="0.4" min="0" max="1" step="0.05" oninput="lt = this.value;infochart.data.datasets.forEach((e,i) => {if(i!=2){e.lineTension = lt}});infochart.update();document.getElementById('lts').innerText='Line tension: '+this.value"><br>
+        <span id="ras">Point radius: 1.5</span><input type="range" value="1.5" min="0" max="3" step="0.05" oninput="ra = this.value;infochart.data.datasets.forEach(e => e.pointRadius = ra);infochart.update();document.getElementById('ras').innerText='Point radius: '+this.value"><br>
+        <span>Fill?</span><input type="checkbox" oninput="infochart.data.datasets.forEach(e => e.fill = this.checked);infochart.update();"><br>
+        <span>Draw lines?</span><input type="checkbox" oninput="infochart.options.showLines = this.checked;infochart.update();" checked><br>
+        <span>Display datapoint source?</span><input type="checkbox" id="source-ch">
+    </modal>
+	<script>
+        /*
+            TODO:
+            * ~ 1615298400000 server created 
+        */
+        Chart.defaults.global.animation.duration = 1200
+        var infochart;
+        var sourcech = document.getElementById("source-ch")
+        window.chartColors = {
+            red: 'rgb(255, 99, 132)',
+            bred: 'rgb(255, 0, 0)',
+            orange: 'rgb(255, 159, 64)',
+            yellow: 'rgb(255, 205, 86)',
+            green: 'rgb(75, 192, 192)',
+            blue: 'rgb(54, 162, 235)',
+            bblue: 'rgb(0, 0, 255)',
+            purple: 'rgb(153, 102, 255)',
+            grey: 'rgb(201, 203, 207)'
+        };
+        var SECOND = 1000
+        var MINUTE = SECOND * 60
+        var HOUR = MINUTE * 60
+        var DAY = HOUR * 24
+        var WEEK = DAY * 7
+        var YEAR = DAY * 365.25
+
+        var ftimes = {
+            ms: 1,
+            s: SECOND,
+            m: MINUTE,
+            h: HOUR,
+            d: DAY,
+            w: WEEK,
+            y: YEAR,
+            a: new Date().getTime()
+        }
+        // var ftimes = {
+        //     p6: 86400000 * 0.25,
+        //     p12: 86400000 * 0.5,
+        //     p24: 86400000 * 1,
+        //     p48: 86400000 * 2,
+        //     p72: 86400000 * 3,
+        //     p96: 86400000 * 4,
+        //     p120: 86400000 * 5,
+        //     p144: 86400000 * 6,
+        //     a: new Date().getTime(),
+        // }
+        function d2ms(duration) {
+            if(duration == "a"){
+                return ftimes[duration]
+            }
+            return duration
+            .match(/[0-9]+(ms|[smhdwya])/g)
+            .reduce(
+                (acc, value) => acc += value.replace(/(ms|[smhdwya])/g, '') * ftimes[value.slice(-1)],
+                0,
+            )
+        }
+        var C_datearr = datearr = ["LABELLABEL"].map(e => new Date(parseInt(e)))
+        var C_pingarr = pingarr = ["PINGLABEL"]
+        var C_onlinearr = onlinearr = ["ONLINELABEL"]
+        var C_maxarr = maxarr = ["MAXLABEL"]
+        var comments = {"1617339901000": "Datapoint from fourk (ping bot)\nJust after restart","1615604400000":"Datapoint from BarrenDome (reddit)","1615416761000":"Datapoint from fourk (screenshot)","1615415940000":"Datapoint from SalC1 (stream)","1615296600000":"Datapoint from SalC1 (Discord server)"}
+        var C_online2b2tarr = online2b2tarr = [];
+        var index = 0;
+        function updateTimeline(uc,anim){
+            if(!anim)Chart.defaults.global.animation.duration = infochart.options.animation.duration = 20
+            var fd = ftimes.a - d2ms(document.getElementById("filter").value)
+            index = 0
+            C_datearr.forEach((e,i) => {if(e.getTime() < fd){/*console.log(e.getTime() , fd);*/index = i;return}})
+            // index--
+            /*console.log("index",index)*/
+            datearr = C_datearr.slice(index)
+            onlinearr = C_onlinearr.slice(index)
+            pingarr = C_pingarr.slice(index)
+            maxarr = C_maxarr.slice(index)
+            // online2b2tarr = C_online2b2tarr.filter(e => e.x >= fd)
+            if(uc){
+                infochart.data.labels = datearr
+                infochart.data.datasets[0].data = pingarr
+                infochart.data.datasets[1].data = onlinearr
+                infochart.data.datasets[2].data = maxarr
+                // infochart.data.datasets[3].data = online2b2tarr
+                infochart.update()
+            }
+            if(!anim)Chart.defaults.global.animation.duration = infochart.options.animation.duration = 1200
+        }
+        var ctx;
+        var lt = 0.4 //0.4
+        var ra = 1.5
+		window.onload = async function() {
+            // C_online2b2tarr = online2b2tarr = JSON.parse(await (await fetch("/api2b2tio?range=7d")).text()).sort().map((e) => {return {x:e[0] * 1000,y:e[1]}});
+			var container = document.querySelector('.container');
+            var div = document.createElement('div');
+            div.classList.add('chart-container');
+            var canvas = document.createElement('canvas');
+            div.appendChild(canvas);
+            container.appendChild(div);
+            ctx = canvas.getContext('2d');
+            var config = {
+                type: 'line',
+                // normalized: true,
+                data: {
+                    labels: C_datearr,
+                    datasets: [{
+                        label: 'Ping',
+                        hidden: true,
+                        borderColor: window.chartColors.red,
+                        backgroundColor: window.chartColors.bred,
+                        data: C_pingarr,
+                        fill: false,
+                        pointRadius: ra,
+                        lineTension: lt,
+                        normalized: true
+                    }, {
+                        label: 'Online players',
+                        borderColor: window.chartColors.blue,
+                        backgroundColor: window.chartColors.bred,
+                        data: C_onlinearr,
+                        fill: false,
+                        pointRadius: ra,
+                        lineTension: lt,
+                        normalized: true
+                    }, {
+                        label: 'Max players',
+                        borderColor: "rgb(30 190 160)",//window.chartColors.green,
+                        backgroundColor: window.chartColors.red,
+                        data: C_maxarr,
+                        fill: false,
+                        pointRadius: ra,
+                        lineTension: 0.001,//lt
+                        normalized: true
+                    }/*,{
+                        label: "2b2t Online players (from 2b2t.io)",
+                        hidden: true,
+                        borderColor: window.chartColors.orange,
+                        backgroundColor: window.chartColors.bblue,
+                        data: online2b2tarr,
+                        fill: false,
+                        pointRadius: ra,
+                        lineTension: lt,
+                        normalized: true
+                        
+                    }*/],
+                },
+                options: {
+                    normalized: true,
+                    responsive: true,
+                    // animation: true,
+                    title: {
+                        display: true,
+                        text: "1.16 testing (2b2t) info",
+                        fontColor: 'gold'
+                    },
+                    tooltips: {
+                        mode: "nearest",
+                        intersect: false,
+                        callbacks: {
+                            footer: function(TooltipItem,object) {
+                                // console.log(TooltipItem,object)
+                                // console.log(object.labels[0].getTime().toString())
+                                // console.log(new Date(TooltipItem[0].xLabel).getTime())
+                                // console.log(comments[new Date(TooltipItem[0].xLabel).getTime()])
+                                var label = ""
+                                if(sourcech.checked){
+                                    label = comments[new Date(TooltipItem[0].xLabel).getTime()] || "Datapoint from fourk (ping bot)";
+                                }
+                                return label
+                            }
+                        },
+                        footerFontStyle: "normal"
+                    },
+                    // downsample: {
+                    //     enabled: true,
+                    //     threshold: 10
+                    // },
+                    // plugins: {
+                    //     decimation: {
+                    //         enabled: true,
+                    //         algorithm: "lttb"
+                    //     }
+                    // },
+                    scales: {
+                        xAxes: [{
+                            type: 'time',
+                            displayFormats: {
+                                unit: 'month'
+                            },
+                            distribution: 'linear',
+                            // gridLines: {
+                            //     color: "rgba(255, 255, 255, 127)",
+                            // }
+                        }],
+                        // yAxes: [{
+                        //     gridLines: {
+                        //         color: "rgba(255, 255, 255, 127)",
+                        //     }
+                        // }]
+                    }
+                }
+            };
+            infochart = new Chart(ctx, config);
+            updateTimeline(true,true)
+		};
+        var darkplugin = {
+            beforeDraw: function(chartInstance) {
+                var tctx = chartInstance.chart.ctx;
+                ctx.fillStyle = '#191919';
+                ctx.fillRect(0, 0, chartInstance.chart.width, chartInstance.chart.height);
+            }
+        }
+        var lightTheme = true//getCookie("lightTheme");
+        // if(lightTheme===undefined)lightTheme = true
+        // lightTheme = lightTheme == true
+        // if(!lightTheme){toggleTheme()}
+        var settingsShown = false//getCookie("settingsShown");
+        // if(settingsShown===undefined)settingsShown = false
+        // settingsShown = settingsShown == true
+        var settingsTimeout = -1;
+        function toggleTheme() {
+            if(lightTheme){
+                Chart.plugins.register(darkplugin)
+                document.body.style.backgroundColor = "#191919"
+                document.body.style.color = "#ffffff"
+                infochart.options.scales.yAxes.forEach(e => {e.gridLines.color = "rgba(255,255,255,0.16)";e.ticks.fontColor = "rgba(250,250,250,0.49)"})
+                infochart.options.scales.xAxes.forEach(e => {e.gridLines.color = "rgba(255,255,255,0.16)";e.ticks.fontColor = "rgba(250,250,250,0.49)"})
+                infochart.options.legend.labels.fontColor = "rgb(255, 255, 255, 0.6)";
+            }else{
+                Chart.plugins.unregister(darkplugin)
+                document.body.style.backgroundColor = "#ffffff"
+                document.body.style.color = "#000000"
+                infochart.options.scales.yAxes.forEach(e => {e.gridLines.color = "rgba(0,0,0,0.1)";e.ticks.fontColor = "rgb(0, 0, 0, 0.6)"})
+                infochart.options.scales.xAxes.forEach(e => {e.gridLines.color = "rgba(0,0,0,0.1)";e.ticks.fontColor = "rgb(0, 0, 0, 0.6)"})
+                infochart.options.legend.labels.fontColor = "rgb(0, 0, 0, 0.6)";
+            }
+            infochart.update()
+            lightTheme = !lightTheme
+            setCookie("lightTheme",lightTheme,7)
+        }
+        function toggleSettings() {
+            clearTimeout(settingsTimeout)
+            document.getElementById('settings-m').classList.remove('leave');
+            document.getElementById('settings-m').classList.remove('appear');
+            if(settingsShown){
+                document.getElementById('settings-m').classList.add('leave');
+                document.getElementById('settings-m').style.right='-250px'
+                settingsTimeout = setTimeout(function () {
+                    document.getElementById('settings-m').classList.remove('leave');
+                },500 - 2)
+                
+            }else{
+                document.getElementById('settings-m').classList.add('appear');
+                document.getElementById('settings-m').style.right='2px'
+                settingsTimeout = setTimeout(function () {
+                    document.getElementById('settings-m').classList.remove('appear');
+                },500 - 2)
+            }
+            settingsShown = !settingsShown
+            setCookie("settingsShown",settingsShown,7)
+        }
+        function setCookie(cname,cvalue,exdays) {
+            var d = new Date();
+            d.setTime(d.getTime() + (exdays*24*60*60*1000));
+            var expires = "expires=" + d.toGMTString();
+            document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+        }
+        function getCookie(cname) {
+            var name = cname + "=";
+            var decodedCookie = decodeURIComponent(document.cookie);
+            var ca = decodedCookie.split(';');
+            for(var i = 0; i < ca.length; i++) {
+                var c = ca[i];
+                while (c.charAt(0) == ' ') {
+                c = c.substring(1);
+                }
+                if (c.indexOf(name) == 0) {
+                return c.substring(name.length, c.length);
+                }
+            }
+            return undefined;
+        }
+	</script>
+</body>
+
+</html>
